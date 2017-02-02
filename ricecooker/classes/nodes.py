@@ -176,6 +176,11 @@ class ChannelNode(Node):
     def get_node_id(self):
         return uuid.uuid5(self.get_domain_namespace(), self.source_id)
 
+    def derive_thumbnail(self):
+        from .files import TiledThumbnailFile
+        self.set_thumbnail(TiledThumbnailFile(self.get_non_topic_descendants()))
+        return self.thumbnail.get_filename()
+
     def to_dict(self):
         """ to_dict: puts data in format CC expects
             Args: None

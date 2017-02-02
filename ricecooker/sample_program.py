@@ -382,7 +382,7 @@ def construct_channel(**kwargs):
         source_domain="learningequality.org",
         source_id="testing-ricecooker-channel",
         title="Testing Ricecooker Channel",
-        thumbnail="https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Banaue_Philippines_Banaue-Rice-Terraces-01.jpg/640px-Banaue_Philippines_Banaue-Rice-Terraces-01.jpg",
+        # thumbnail="https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Banaue_Philippines_Banaue-Rice-Terraces-01.jpg/640px-Banaue_Philippines_Banaue-Rice-Terraces-01.jpg",
     )
 
     _build_tree(channel, SAMPLE_TREE)
