@@ -111,7 +111,6 @@ def get_hash(filepath):
             hash.update(chunk)
     return hash.hexdigest()
 
-
 def compress_video_file(filename, ffmpeg_settings):
     ffmpeg_settings = ffmpeg_settings or {}
     key = generate_key("COMPRESSED", filename, settings=ffmpeg_settings, default=" (default compression)")
@@ -152,26 +151,6 @@ def download_from_web(web_url, download_settings):
 
         FILECACHE.set(key, bytes(filename, "utf-8"))
         return filename
-
-class ThumbnailPresetMixin(object):
-
-    def get_preset(self):
-        if isinstance(self.node, ChannelNode):
-            return format_presets.CHANNEL_THUMBNAIL
-        elif isinstance(self.node, TopicNode):
-            return format_presets.TOPIC_THUMBNAIL
-        elif isinstance(self.node, VideoNode):
-            return format_presets.VIDEO_THUMBNAIL
-        elif isinstance(self.node, AudioNode):
-            return format_presets.AUDIO_THUMBNAIL
-        elif isinstance(self.node, DocumentNode):
-            return format_presets.DOCUMENT_THUMBNAIL
-        elif isinstance(self.node, ExerciseNode):
-            return format_presets.EXERCISE_THUMBNAIL
-        elif isinstance(self.node, HTML5AppNode):
-            return format_presets.HTML5_THUMBNAIL
-        else:
-            raise UnknownFileTypeError("Thumbnails are not supported for node kind.")
 
 class File(object):
     original_filename = None
@@ -242,10 +221,61 @@ class DownloadFile(File):
             self.error = err
             config.FAILED_FILES.append(self)
 
-class ThumbnailFile(ThumbnailPresetMixin, DownloadFile):
-    default_ext = file_formats.PNG
-    allowed_formats = [file_formats.JPG, file_formats.JPEG, file_formats.PNG]
 
+""" VIDEO CLASSES """
+class VideoPresetMixin(object):
+    default_ext = file_formats.MP4
+    allowed_formats = [file_formats.MP4]
+
+    def get_preset(self):
+        return self.preset or guess_video_preset_by_resolution(config.get_storage_path(self.filename))
+
+class VideoFile(VideoPresetMixin, DownloadFile):
+
+    def __init__(self, path, ffmpeg_settings=None, **kwargs):
+        self.ffmpeg_settings = ffmpeg_settings
+        super(VideoFile, self).__init__(path, **kwargs)
+
+    def process_file(self):
+        try:
+            # Get copy of video before compression (if specified)
+            self.filename = super(VideoFile, self).process_file()
+            if self.filename and (self.ffmpeg_settings or config.COMPRESS):
+                self.filename = compress_video_file(self.filename, self.ffmpeg_settings)
+                config.LOGGER.info("\t--- Compressed {}".format(self.filename))
+            return self.filename
+        # Catch errors related to ffmpeg and handle silently
+        except (BrokenPipeError, CalledProcessError, IOError) as err:
+            self.error = err
+            config.FAILED_FILES.append(self)
+
+class WebVideoFile(VideoPresetMixin, File):
+    # In future, look into postprocessors and progress_hooks
+    def __init__(self, web_url, download_settings=None, high_resolution=True, **kwargs):
+        self.web_url = web_url
+        self.download_settings = download_settings or {}
+        self.download_settings['format'] = "22/best" if high_resolution else "18/worst"
+
+        super(WebVideoFile, self).__init__(**kwargs)
+
+    def process_file(self):
+        try:
+            self.filename = download_from_web(self.web_url, self.download_settings)
+            config.LOGGER.info("\t--- Downloaded (YouTube) {}".format(self.filename))
+            return self.filename
+        except youtube_dl.utils.DownloadError as err:
+            self.error = str(err)
+            config.FAILED_FILES.append(self)
+
+class YouTubeVideoFile(WebVideoFile):
+    def __init__(self, youtube_id, **kwargs):
+        super(YouTubeVideoFile, self).__init__('http://www.youtube.com/watch?v={}'.format(youtube_id), **kwargs)
+
+# VectorizedVideoFile
+
+
+
+""" NON-VIDEO CLASSES """
 class AudioFile(DownloadFile):
     default_ext = file_formats.MP3
     allowed_formats = [file_formats.MP3]
@@ -277,6 +307,53 @@ class HTMLZipFile(DownloadFile):
             except KeyError:
                 assert False, "Assumption Failed: HTML zip must have an `index.html` file at topmost level"
 
+class SubtitleFile(DownloadFile):
+    default_ext = file_formats.VTT
+    allowed_formats = [file_formats.VTT]
+
+    def __init__(self, path, **kwargs):
+        super(SubtitleFile, self).__init__(path, **kwargs)
+        assert self.language, "Subtitles must have a language"
+
+    def get_preset(self):
+        return self.preset or format_presets.VIDEO_SUBTITLE
+
+# UniversalSubsSubtitleFile
+
+# class UniversalSubsSubtitleFile(SubtitleFile):
+#     def __init__(self, us_id, language):
+#         response = sess.get("http://usubs.org/api/{}".format(us_id))
+#         path = json.loads(response.content)["subtitle_url"]
+#         return super(UniversalSubsSubtitleFile, self).__init__(path=path, language=language)
+
+
+
+""" THUMBNAIL CLASSES """
+class ThumbnailPresetMixin(object):
+    allowed_formats = [file_formats.JPG, file_formats.JPEG, file_formats.PNG]
+    default_ext = file_formats.PNG
+
+    def get_preset(self):
+        if isinstance(self.node, ChannelNode):
+            return format_presets.CHANNEL_THUMBNAIL
+        elif isinstance(self.node, TopicNode):
+            return format_presets.TOPIC_THUMBNAIL
+        elif isinstance(self.node, VideoNode):
+            return format_presets.VIDEO_THUMBNAIL
+        elif isinstance(self.node, AudioNode):
+            return format_presets.AUDIO_THUMBNAIL
+        elif isinstance(self.node, DocumentNode):
+            return format_presets.DOCUMENT_THUMBNAIL
+        elif isinstance(self.node, ExerciseNode):
+            return format_presets.EXERCISE_THUMBNAIL
+        elif isinstance(self.node, HTML5AppNode):
+            return format_presets.HTML5_THUMBNAIL
+        else:
+            raise UnknownFileTypeError("Thumbnails are not supported for node kind.")
+
+class ThumbnailFile(ThumbnailPresetMixin, DownloadFile):
+    pass
+
 class ExtractedVideoThumbnailFile(ThumbnailFile):
 
     def process_file(self):
@@ -300,66 +377,44 @@ class ExtractedVideoThumbnailFile(ThumbnailFile):
             FILECACHE.set(key, bytes(filename, "utf-8"))
             return filename
 
-class VideoFile(DownloadFile):
-    default_ext = file_formats.MP4
-    allowed_formats = [file_formats.MP4]
+class TiledThumbnailFile(ThumbnailPresetMixin, File):
 
-    def __init__(self, path, ffmpeg_settings=None, **kwargs):
-        self.ffmpeg_settings = ffmpeg_settings
-        super(VideoFile, self).__init__(path, **kwargs)
-
-    def get_preset(self):
-        return self.preset or guess_video_preset_by_resolution(config.get_storage_path(self.filename))
-
-    def process_file(self):
-        try:
-            # Get copy of video before compression (if specified)
-            self.filename = super(VideoFile, self).process_file()
-            if self.filename and (self.ffmpeg_settings or config.COMPRESS):
-                self.filename = compress_video_file(self.filename, self.ffmpeg_settings)
-                config.LOGGER.info("\t--- Compressed {}".format(self.filename))
-            return self.filename
-        # Catch errors related to ffmpeg and handle silently
-        except (BrokenPipeError, CalledProcessError, IOError) as err:
-            self.error = err
-            config.FAILED_FILES.append(self)
-
-
-class WebVideoFile(File):
-    # In future, look into postprocessors and progress_hooks
-    def __init__(self, web_url, download_settings=None, high_resolution=True, **kwargs):
-        self.web_url = web_url
-        self.download_settings = download_settings or {}
-        self.download_settings['format'] = "22/best" if high_resolution else "18/worst"
-
-        super(WebVideoFile, self).__init__(**kwargs)
-
-    def get_preset(self):
-        return self.preset or guess_video_preset_by_resolution(config.get_storage_path(self.filename))
+    def __init__(self, source_nodes, **kwargs):
+        self.sources = []
+        for n in source_nodes:
+            images = [f for f in n.files if isinstance(f, ThumbnailFile) and f.get_filename()]
+            if len(images) > 0:
+                self.sources.append(images[0])
+        super(TiledThumbnailFile, self).__init__(**kwargs)
 
     def process_file(self):
-        try:
-            self.filename = download_from_web(self.web_url, self.download_settings)
-            config.LOGGER.info("\t--- Downloaded (YouTube) {}".format(self.filename))
-            return self.filename
-        except youtube_dl.utils.DownloadError as err:
-            self.error = str(err)
-            config.FAILED_FILES.append(self)
+        self.filename = self.generate_tiled_image()
+        config.LOGGER.info("\t--- Tiled image {}".format(self.filename))
+        return self.filename
 
-class YouTubeVideoFile(WebVideoFile):
-    def __init__(self, youtube_id, **kwargs):
-        super(YouTubeVideoFile, self).__init__('http://www.youtube.com/watch?v={}'.format(youtube_id), **kwargs)
+    def generate_tiled_image(self):
+        num_pictures = 0
+        if len(self.sources) >= 4:
+            num_pictures = 4
+        elif len(self.sources) >= 1:
+            num_pictures = 1
+        else:
+            return None
 
-class SubtitleFile(DownloadFile):
-    default_ext = file_formats.VTT
-    allowed_formats = [file_formats.VTT]
+        images = [config.get_storage_path(f.get_filename()) for f in self.sources[:num_pictures]]
+        key = "TILED {}".format("+".join(sorted(images)))
+        if not config.UPDATE and FILECACHE.get(key):
+            return FILECACHE.get(key).decode('utf-8')
 
-    def __init__(self, path, **kwargs):
-        super(SubtitleFile, self).__init__(path, **kwargs)
-        assert self.language, "Subtitles must have a language"
+        config.LOGGER.info("\tTiling thumbnail for {}".format(self.node.title))
+        with tempfile.NamedTemporaryFile(suffix=".{}".format(file_formats.PNG)) as tempf:
+            tempf.close()
+            create_tiled_image(images, tempf.name)
+            filename = "{}.{}".format(get_hash(tempf.name), file_formats.PNG)
 
-    def get_preset(self):
-        return self.preset or format_presets.VIDEO_SUBTITLE
+            copy_file_to_storage(filename, tempf.name)
+            FILECACHE.set(key, bytes(filename, "utf-8"))
+            return filename
 
 class Base64ImageFile(ThumbnailPresetMixin, File):
 
@@ -399,6 +454,8 @@ class Base64ImageFile(ThumbnailPresetMixin, File):
             FILECACHE.set(key, bytes(filename, "utf-8"))
             return filename
 
+
+""" INTERNAL CLASSES """
 class _ExerciseBase64ImageFile(Base64ImageFile):
     default_ext = file_formats.PNG
 
@@ -469,55 +526,3 @@ class _ExerciseGraphieFile(DownloadFile):
 
             FILECACHE.set(key, bytes(filename, "utf-8"))
             return filename
-
-
-class TiledThumbnailFile(ThumbnailPresetMixin, File):
-    allowed_formats = [file_formats.JPG, file_formats.JPEG, file_formats.PNG]
-
-    def __init__(self, source_nodes, **kwargs):
-        self.sources = []
-        for n in source_nodes:
-            images = [f for f in n.files if isinstance(f, ThumbnailFile) and f.get_filename()]
-            if len(images) > 0:
-                self.sources.append(images[0])
-        super(TiledThumbnailFile, self).__init__(**kwargs)
-
-    def process_file(self):
-        self.filename = self.generate_tiled_image()
-        config.LOGGER.info("\t--- Tiled image {}".format(self.filename))
-        return self.filename
-
-    def generate_tiled_image(self):
-        num_pictures = 0
-        if len(self.sources) >= 4:
-            num_pictures = 4
-        elif len(self.sources) >= 1:
-            num_pictures = 1
-        else:
-            return None
-
-        images = [config.get_storage_path(f.get_filename()) for f in self.sources[:num_pictures]]
-        key = "TILED {}".format("+".join(sorted(images)))
-        if not config.UPDATE and FILECACHE.get(key):
-            return FILECACHE.get(key).decode('utf-8')
-
-        config.LOGGER.info("\tTiling thumbnail for {}".format(self.node.title))
-        with tempfile.NamedTemporaryFile(suffix=".{}".format(file_formats.PNG)) as tempf:
-            tempf.close()
-            create_tiled_image(images, tempf.name)
-            filename = "{}.{}".format(get_hash(tempf.name), file_formats.PNG)
-
-            copy_file_to_storage(filename, tempf.name)
-            FILECACHE.set(key, bytes(filename, "utf-8"))
-            return filename
-
-
-# VectorizedVideoFile
-# UniversalSubsSubtitleFile
-
-# class UniversalSubsSubtitleFile(SubtitleFile):
-#     def __init__(self, us_id, language):
-#         response = sess.get("http://usubs.org/api/{}".format(us_id))
-#         path = json.loads(response.content)["subtitle_url"]
-#         return super(UniversalSubsSubtitleFile, self).__init__(path=path, language=language)
-

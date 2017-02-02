@@ -200,7 +200,7 @@ SAMPLE_TREE = [
                         "path" : "https://ia801407.us.archive.org/21/items/ah_Rice/Rice.mp3",
                     },
                 ],
-                "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/b/ba/Rice_grains_(IRRI).jpg",
+                # "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/b/ba/Rice_grains_(IRRI).jpg",
                 "description": "Get online updates regarding world's leading long grain rice distributors, broken rice distributors, rice suppliers, parboiled rice exporter on our online B2B marketplace TradeBanq.",
                 "license": licenses.PUBLIC_DOMAIN,
             },
@@ -218,9 +218,9 @@ SAMPLE_TREE = [
                             {
                                 "path" : "https://ia601301.us.archive.org/31/items/The_History_of_Japanese_Rice_Lopez-Richter/The_History_of_Japanese_Rice_Lopez-Richter.pdf",
                             },
-                            {
-                                "path" : "http://res.freestockphotos.biz/pictures/17/17321-a-bowl-of-rice-with-chopsticks-pv.jpg",
-                            },
+                            # {
+                            #     "path" : "http://res.freestockphotos.biz/pictures/17/17321-a-bowl-of-rice-with-chopsticks-pv.jpg",
+                            # },
                         ],
                         "license": licenses.CC_BY,
                     },
