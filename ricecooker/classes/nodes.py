@@ -28,9 +28,7 @@ class Node(object):
         self.set_thumbnail(thumbnail)
 
     def __str__(self):
-        count = self.count()
-        metadata = "{0} {1}".format(count, "descendant" if count == 1 else "descendants")
-        return "{title} ({kind}): {metadata}".format(title=self.title, kind=self.__class__.__name__, metadata=metadata)
+        pass
 
     def to_dict(self):
         """ to_dict: puts data in format CC expects
@@ -101,15 +99,6 @@ class Node(object):
             total += child.count()
         return total
 
-    def get_non_topic_descendants(self):
-        if len(self.descendants) == 0:
-            for child_node in self.children:
-                if child_node.kind == content_kinds.TOPIC:
-                    self.descendants += child_node.get_non_topic_descendants()
-                elif child_node not in self.descendants:
-                    self.descendants.append(child_node)
-        return self.descendants
-
     def print_tree(self, indent=2):
         """ print_tree: prints out structure of tree
             Args: indent (int): What level of indentation at which to start printing
@@ -146,7 +135,28 @@ class Node(object):
         return True
 
 
-class ChannelNode(Node):
+class ParentNodeMixin(object):
+    def get_non_topic_descendants(self):
+        if len(self.descendants) == 0:
+            for child_node in self.children:
+                if child_node.kind == content_kinds.TOPIC:
+                    self.descendants += child_node.get_non_topic_descendants()
+                elif child_node not in self.descendants:
+                    self.descendants.append(child_node)
+        return self.descendants
+
+    def __str__(self):
+        count = self.count()
+        metadata = "{0} {1}".format(count, "descendant" if count == 1 else "descendants")
+        return "{title} ({kind}): {metadata}".format(title=self.title, kind=self.__class__.__name__, metadata=metadata)
+
+    def derive_thumbnail(self):
+        from .files import TiledThumbnailFile
+        self.set_thumbnail(TiledThumbnailFile(self.get_non_topic_descendants()))
+        return self.thumbnail.get_filename()
+
+
+class ChannelNode(ParentNodeMixin, Node):
     """ Model representing the channel you are creating
 
         Used to store metadata on channel that is being created
@@ -175,11 +185,6 @@ class ChannelNode(Node):
 
     def get_node_id(self):
         return uuid.uuid5(self.get_domain_namespace(), self.source_id)
-
-    def derive_thumbnail(self):
-        from .files import TiledThumbnailFile
-        self.set_thumbnail(TiledThumbnailFile(self.get_non_topic_descendants()))
-        return self.thumbnail.get_filename()
 
     def to_dict(self):
         """ to_dict: puts data in format CC expects
@@ -285,7 +290,7 @@ class TreeNode(Node):
         return super(TreeNode, self).validate()
 
 
-class TopicNode(TreeNode):
+class TopicNode(ParentNodeMixin, TreeNode):
     """ Model representing channel topics
 
         Topic nodes are used to add organization to the channel's content
@@ -297,10 +302,6 @@ class TopicNode(TreeNode):
             thumbnail (str): local path or url to thumbnail image (optional)
     """
     kind = content_kinds.TOPIC
-    def derive_thumbnail(self):
-        from .files import TiledThumbnailFile
-        self.set_thumbnail(TiledThumbnailFile(self.get_non_topic_descendants()))
-        return self.thumbnail.get_filename()
 
     def validate(self):
         """ validate: Makes sure topic is valid
@@ -405,28 +406,21 @@ class VideoNode(ContentNode):
         self.generate_thumbnail = derive_thumbnail
         super(VideoNode, self).__init__(source_id, title, license, **kwargs)
 
-    def process_files(self):
-        """ download_files: Download video's files
-            Args: None
-            Returns: None
-        """
+    def derive_thumbnail(self):
         from .files import VideoFile, ExtractedVideoThumbnailFile, WebVideoFile
-
-        downloaded = super(VideoNode, self).process_files()
 
         try:
             # Extract thumbnail if one hasn't been provided and derive_thumbnail is set
-            if self.generate_thumbnail and not self.has_thumbnail():
+            if self.generate_thumbnail:
                 videos = [f for f in self.files if isinstance(f, VideoFile) or isinstance(f, WebVideoFile)]
                 assert len(videos) > 0 and videos[0].filename, "Cannot extract thumbnail (No videos found on node {0})".format(self.source_id)
 
                 self.set_thumbnail(ExtractedVideoThumbnailFile(config.get_storage_path(videos[0].filename)))
-                downloaded.append(self.thumbnail.get_filename())
+                return self.thumbnail.get_filename()
 
         except AssertionError as ae:
             config.LOGGER.warning(ae)
 
-        return downloaded
 
     def validate(self):
         """ validate: Makes sure video is valid
